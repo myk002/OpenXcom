@@ -62,7 +62,7 @@ static int _getProfitPerTimeQuantum(Mod *mod, RuleManufacture* item)
 	static const int MAN_HOURS = 10000; // arbitrary large number indicating a number of engineers working for some unit of time
 	float itemsPerTimeQuantum = (float)MAN_HOURS / (float)item->getManufactureTime();
 
-	return (producedItemsValue - (item->getManufactureCost()) * itemsPerTimeQuantum;
+	return (producedItemsValue - item->getManufactureCost()) * itemsPerTimeQuantum;
 }
 
 /**

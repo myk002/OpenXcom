@@ -26,6 +26,8 @@
 #include "../Engine/LocalizedText.h"
 #include "../Engine/Options.h"
 #include "../Mod/Mod.h"
+#include "../Mod/RuleCraft.h"
+#include "../Mod/RuleItem.h"
 #include "../Mod/RuleManufacture.h"
 #include "../Savegame/SavedGame.h"
 #include "../Savegame/Base.h"
@@ -33,6 +35,35 @@
 
 namespace OpenXcom
 {
+
+static int _getProfitPerTimeQuantum(Mod *mod, RuleManufacture* item)
+{
+	// simplify by ignoring items that use other items
+	if (item->getRequiredItems().begin() != item->getRequiredItems().end())
+	{
+		return 0;
+	}
+
+	int producedItemsValue = 0;
+	for (std::map<std::string, int>::const_iterator i = item->getProducedItems().begin(); i != item->getProducedItems().end(); ++i)
+	{
+		int sellCost = 0;
+		if (item->getCategory() == "STR_CRAFT")
+		{
+			sellCost = mod->getCraft(i->first)->getSellCost();
+		}
+		else
+		{
+			sellCost = mod->getItem(i->first)->getSellCost();
+		}
+		producedItemsValue += sellCost * i->second;
+	}
+
+	static const int MAN_HOURS = 10000; // arbitrary large number indicating a number of engineers working for some unit of time
+	float itemsPerTimeQuantum = (float)MAN_HOURS / (float)item->getManufactureTime();
+
+	return (producedItemsValue - (item->getManufactureCost()) * itemsPerTimeQuantum;
+}
 
 /**
  * Initializes all the elements in the productions list screen.
@@ -88,8 +119,16 @@ NewManufactureListState::NewManufactureListState(Base *base) : _base(base)
 	_game->getSavedGame()->getAvailableProductions(_possibleProductions, _game->getMod(), _base);
 	_catStrings.push_back("STR_ALL_ITEMS");
 
+	Mod *mod = _game->getMod();
+	bool hasProfitableItems = false;
 	for (std::vector<RuleManufacture *>::iterator it = _possibleProductions.begin(); it != _possibleProductions.end(); ++it)
 	{
+		if (!hasProfitableItems)
+		{
+			int profit = _getProfitPerTimeQuantum(mod, *it);
+			hasProfitableItems = (0 < profit);
+		}
+
 		bool addCategory = true;
 		for (size_t x = 0; x < _catStrings.size(); ++x)
 		{
@@ -103,6 +142,11 @@ NewManufactureListState::NewManufactureListState(Base *base) : _base(base)
 		{
 			_catStrings.push_back((*it)->getCategory());
 		}
+	}
+
+	if (hasProfitableItems)
+	{
+		_catStrings.push_back("STR_PROFITABLE_ITEMS");
 	}
 
 	_cbxCategory->setOptions(_catStrings, true);
@@ -155,6 +199,11 @@ void NewManufactureListState::cbxCategoryChange(Action *)
 	fillProductionList();
 }
 
+static bool _compareFirst (const std::pair<int, RuleManufacture *> &lhs, const std::pair<int, RuleManufacture *> &rhs)
+{
+	return lhs.first > rhs.first;
+}
+
 /**
  * Fills the list of possible productions.
  */
@@ -165,13 +214,37 @@ void NewManufactureListState::fillProductionList()
 	_game->getSavedGame()->getAvailableProductions(_possibleProductions, _game->getMod(), _base);
 	_displayedStrings.clear();
 
+
+	std::string curCategory = _catStrings[_cbxCategory->getSelected()];
+	bool showOnlyProfitable = curCategory == "STR_PROFITABLE_ITEMS";
+	bool showAll = showOnlyProfitable || curCategory == "STR_ALL_ITEMS";
+	Mod *mod = _game->getMod();
+	std::list< std::pair<int, RuleManufacture *> > visibleItems;
+
 	for (std::vector<RuleManufacture *>::iterator it = _possibleProductions.begin(); it != _possibleProductions.end(); ++it)
 	{
-		if (((*it)->getCategory() == _catStrings[_cbxCategory->getSelected()]) || (_catStrings[_cbxCategory->getSelected()] == "STR_ALL_ITEMS"))
+		int profit = _getProfitPerTimeQuantum(mod, *it);
+		if (0 >= profit && showOnlyProfitable)
 		{
-			_lstManufacture->addRow(2, tr((*it)->getName()).c_str(), tr((*it)->getCategory()).c_str());
-			_displayedStrings.push_back((*it)->getName());
+			continue;
 		}
+
+		if (showAll || (*it)->getCategory() == _catStrings[_cbxCategory->getSelected()])
+		{
+			visibleItems.push_back(std::pair<int, RuleManufacture *>(profit, *it));
+		}
+	}
+
+	if (showOnlyProfitable)
+	{
+		visibleItems.sort(_compareFirst);
+	}
+
+	for (std::list< std::pair<int, RuleManufacture *> >::iterator it = visibleItems.begin(); it != visibleItems.end(); ++it)
+	{
+		std::string name = it->second->getName();
+		_lstManufacture->addRow(2, tr(name).c_str(), tr(it->second->getCategory()).c_str());
+		_displayedStrings.push_back(name.c_str());
 	}
 }
 
